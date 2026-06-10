@@ -62,14 +62,45 @@ if (pthread_mutex_lock(&m) == EOWNERDEAD)
 pthread_mutex_unlock(&m);
 
 
+SEMAFORY
+
 
 
 named sem:
+NIE MUSISZ UZYWAC MMAP !!!!!!!!!!!!!!!!
+
 sem_t *sem = sem_open("/gate", O_CREAT, 0666, 10);
 sem_wait(sem);   // wchodzi (dekrementuje)
 sem_post(sem);   // wychodzi (inkrementuje)
 sem_close(sem);
 sem_unlink("/gate");
+
+
+
+tutaj w struct np:
+typedef struct {
+    sem_t *gate;
+} shared_t;
+
+sh->gate = sem_open("/gate", O_CREAT, 0666, 10);
+
+
+
+
+
+BARRIERY:
+pthread_barrierattr_t attr;
+pthread_barrierattr_init(&attr);
+pthread_barrierattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+
+pthread_barrier_init(&sh->bar, &attr, N_PROCESSES);
+
+uzycie:
+pthread_barrier_wait(&sh->bar);
+
+cleanup:
+pthread_barrier_destroy(&sh->bar);
+pthread_barrierattr_destroy(&attr);
 
 
 
