@@ -1,0 +1,43 @@
+
+
+
+
+
+
+zeby sharowac miedzy procesami
+
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+
+to samo dla cond:
+
+    pthread_condattr_t cattr;
+    pthread_condattr_init(&cattr);
+    pthread_condattr_setpshared(&cattr, PTHREAD_PROCESS_SHARED);
+    pthread_cond_init(&shared->cond);
+
+
+
+
+
+Używasz PTHREAD_MUTEX_ROBUST wtedy, gdy mutex jest współdzielony między procesami i istnieje ryzyko, że proces który go trzyma może umrzeć (crash/kill), a system ma się sam odzyskać bez permanentnego deadlocka.
+
+pthread_mutexattr_t attr;
+pthread_mutex_t m;
+
+pthread_mutexattr_init(&attr);
+pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+pthread_mutexattr_setrobust(&attr, PTHREAD_MUTEX_ROBUST);
+
+pthread_mutex_init(&m, &attr);
+
+/* proces A może umrzeć w trakcie trzymania mutexa */
+
+if (pthread_mutex_lock(&m) == EOWNERDEAD)
+{
+    // poprzedni właściciel padł
+    pthread_mutex_consistent(&m); // napraw mutex
+}
+
+pthread_mutex_unlock(&m);
