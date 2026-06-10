@@ -1,4 +1,23 @@
+conditional variable:
+void* thread_func(void* arg)
+{
+    pthread_mutex_lock(&mutex);
 
+    // 1) czekanie na warunek
+    while (!ready) {
+        pthread_cond_wait(&cond, &mutex);
+    }
+
+    // 2) robisz coś po spełnieniu warunku
+    // ...
+
+    // 3) zmieniasz stan i budzisz innych
+    ready = 0; // albo inna zmiana stanu
+    pthread_cond_signal(&cond);
+
+    pthread_mutex_unlock(&mutex);
+    return NULL;
+}
 
 
 
@@ -41,3 +60,56 @@ if (pthread_mutex_lock(&m) == EOWNERDEAD)
 }
 
 pthread_mutex_unlock(&m);
+
+
+
+
+
+
+
+
+
+
+
+
+tego ostatnio nie umialem wiec wklejam jakby bylo podobne :(
+
+
+void child_work(shared_t *sh)
+{
+    while (1)
+    {
+        // 1. próbuj znaleźć dom
+        for (int i = 0; i < sh->mutex_count; i++)
+        {
+            if (pthread_mutex_trylock(&sh->mx[i]) == 0)
+            {
+                printf("[%d] Such a comfortable house no. <%d>!\n",
+                       getpid(), i);
+
+                ms_sleep(300);
+
+                pthread_mutex_unlock(&sh->mx[i]);
+
+                // budzimy kogoś, bo dom się zwolnił
+                pthread_cond_signal(&sh->cond);
+
+                return;
+            }
+        }
+
+        // 2. jeśli nie znalazł domu → czekaj
+        pthread_mutex_lock(&sh->free_house_mx);
+
+        pthread_cond_wait(&sh->cond, &sh->free_house_mx);
+
+        pthread_mutex_unlock(&sh->free_house_mx);
+
+        // po przebudzeniu → loop od nowa
+        printf("[%d] Let's try again\n", getpid());
+    }
+}
+
+
+
+
