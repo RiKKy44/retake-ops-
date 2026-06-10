@@ -64,10 +64,12 @@ pthread_mutex_unlock(&m);
 
 
 
-
-
-
-
+named sem:
+sem_t *sem = sem_open("/gate", O_CREAT, 0666, 10);
+sem_wait(sem);   // wchodzi (dekrementuje)
+sem_post(sem);   // wychodzi (inkrementuje)
+sem_close(sem);
+sem_unlink("/gate");
 
 
 
