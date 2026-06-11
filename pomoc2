@@ -1,0 +1,213 @@
+===============================================================================
+               KOMPENDIUM I ŚCIĄGAWKA IPC, SYCHRONIZACJI I SIECI (SOP)
+===============================================================================
+
+-------------------------------------------------------------------------------
+1. KOLEJKI FIFO (POTOKI NAZWANE)
+-------------------------------------------------------------------------------
+FIFO istnieje jako fizyczny plik specjalny na dysku, pozwalając na asynchroniczny
+przepływ bajtów (strumień) między niespokrewnionymi procesami.
+
+* mkfifo(const char *pathname, mode_t mode)
+  - Tworzy plik FIFO na dysku (zazwyczaj mode = 0666).
+  - Zwraca -1 i ustawia errno = EEXIST, jeśli plik już istnieje. 
+    Zawsze przed tą funkcją warto wywołać asekuracyjnie unlink().
+
+* unlink(const char *pathname)
+  - Usuwa plik FIFO z systemu plików (sprzątanie po zakończeniu programu).
+
+* open(const char *pathname, int flags)
+  - Otwiera FIFO. Flagi: O_RDONLY (czytelnik) lub O_WRONLY (pisarz).
+  - Domyślnie BLOKUJE proces, dopóki druga strona nie otworzy tego samego FIFO.
+
+-------------------------------------------------------------------------------
+2. GNIAZDA TCP (SOCK_STREAM)
+-------------------------------------------------------------------------------
+Strumieniowe, niezawodne połączenie sieciowe klient-serwer. Serwer przechodzi 
+przez cztery kluczowe etapy:
+
+* socket(AF_INET, SOCK_STREAM, 0)
+  - Tworzy punkt końcowy komunikacji. SOCK_STREAM wymusza protokół TCP.
+
+* bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
+  - Przypisuje gniazdu konkretny adres IP i numer portu w systemie.
+
+* listen(int sockfd, int backlog)
+  - Przełącza gniazdo w tryb nasłuchiwania (oczekiwanie na klientów).
+
+* accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
+  - Wyciąga klienta z kolejki połączeń i tworzy dla niego ZUPEŁNIE NOWY deskryptor 
+    pliku do dedykowanej komunikacji.
+
+-------------------------------------------------------------------------------
+3. GNIAZDA UDP (SOCK_DGRAM)
+-------------------------------------------------------------------------------
+Protokół bezpołączeniowy i datagramowy. Brak etapów listen/accept. Serwer wiąże
+się z portem i zbiera niezależne paczki binarne (datagramy).
+
+* socket(AF_INET, SOCK_DGRAM, 0)
+  - Tworzy gniazdo UDP (SOCK_DGRAM).
+
+* recvfrom(int sockfd, void *buf, size_t len, int flags, 
+           struct sockaddr *src_addr, socklen_t *addrlen)
+  - Odbiera datagram z gniazda UDP i zapisuje adres nadawcy do src_addr.
+
+* sendto(int sockfd, const void *buf, size_t len, int flags, 
+         const struct sockaddr *dest_addr, socklen_t addrlen)
+  - Wysyła pojedynczą paczkę danych UDP pod wskazany adres dest_addr.
+
+-------------------------------------------------------------------------------
+4. MULTIPLEKSACJA DESKRYPTORÓW: epoll
+-------------------------------------------------------------------------------
+Pozwala jednemu wątkowi/procesowi monitorować wiele deskryptorów naraz.
+
+* epoll_create1(int flags)
+  - Tworzy instancję epoll (zazwyczaj przekazuje się 0).
+
+* epoll_ctl(int epfd, int op, int fd, struct epoll_event *event)
+  - Kontroluje listę monitorowanych plików.
+  - Opcje (op): EPOLL_CTL_ADD (dodaj), EPOLL_CTL_DEL (usuń), EPOLL_CTL_MOD (zmień).
+  - Typy (event->events): EPOLLIN (gotowy do odczytu), EPOLLOUT (gotowy do zapisu).
+
+* epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
+  - Usypia proces. Budzi go, gdy na którymś z zarejestrowanych urządzeń wystąpi 
+    zdarzenie. Timeout = -1 oznacza czekanie w nieskończoność.
+
+-------------------------------------------------------------------------------
+5. PAMIĘĆ DZIELONA POSIX (SHM - Shared Memory)
+-------------------------------------------------------------------------------
+Pozwala wielu procesom współdzielić ten sam fizyczny obszar pamięci RAM. Jest to 
+najszybszy mechanizm IPC (brak kopiowania danych przez jądro systemu).
+
+* shm_open(const char *name, int oflag, mode_t mode)
+  - Tworzy lub otwiera obiekt pamięci dzielonej (wirtualny plik najczęściej w /dev/shm).
+  - Flagi: O_CREAT, O_RDWR, O_TRUNC. Zwraca deskryptor pliku (fd).
+
+* ftruncate(int fd, off_t length)
+  - Ustala lub zmienia fizyczny rozmiar segmentu pamięci dzielonej (w bajtach). 
+    Domyślnie nowo utworzony segment ma rozmiar 0!
+
+* mmap(void *addr, size_t length, int prot, int flags, int fd, off_t offset)
+  - Mapuje obiekt (np. shm lub zwykły plik) do przestrzeni adresowej procesu.
+  - Prot: PROT_READ | PROT_WRITE.
+  - Flagi: MAP_SHARED (zmiany widoczne dla innych) lub MAP_ANONYMOUS (pamięć 
+    czysta, bez powiązania z plikiem/shm, idealna do komunikacji rodzic-dziecko po fork()).
+
+* munmap(void *addr, size_t length)
+  - Odmapowuje segment z przestrzeni adresowej procesu.
+
+* shm_unlink(const char *name)
+  - Usuwa nazwę obiektu pamięci dzielonej z systemu. Segment zniknie fizycznie, 
+    gdy ostatni proces go odmapuje.
+
+-------------------------------------------------------------------------------
+6. SEMAFORY POSIX (NAZWANE I ANONIMOWE)
+-------------------------------------------------------------------------------
+Liczniki służące do synchronizacji. Operacja down (wait) zmniejsza licznik (jeśli 
+wynosi 0 - blokuje proces). Operacja up (post) zwiększa licznik i budzi oczekujących.
+
+--- A. SEMAFORY NAZWANE (Dla niespokrewnionych procesów, widoczne w /dev/shm) ---
+* sem_open(const char *name, int oflag, mode_t mode, unsigned int value)
+  - Tworzy lub otwiera semafor nazwany z wartością początkową 'value'.
+
+* sem_close(sem_t *sem)
+  - Zamyka dostęp do semafora w danym procesie.
+
+* sem_unlink(const char *name)
+  - Usuwa semafor z systemu plików.
+
+--- B. SEMAFORY ANONIMOWE (Wątki lub procesy w mmap SHARED) ---
+* sem_init(sem_t *sem, int pshared, unsigned int value)
+  - Inicjalizuje semafor w miejscu wskazanym przez wskaźnik.
+  - pshared = 0: semafor dla wątków jednego procesu.
+  - pshared = 1: semafor międzyprocesowy (musi leżeć w mmap SHARED!).
+
+* sem_destroy(sem_t *sem)
+  - Niszczy semafor anonimowy.
+
+--- C. OPERACJE WSPÓLNE ---
+* sem_wait(sem_t *sem)   - Zmniejsza licznik (blokuje, jeśli licznik == 0). [Operacja P / Down]
+* sem_post(sem_t *sem)   - Zwiększa licznik (budzi inny proces/wątek). [Operacja V / Up]
+* sem_trywait(sem_t *sem)- Wersja nieblokująca. Jeśli licznik == 0, zwraca -1 i errno = EAGAIN.
+
+-------------------------------------------------------------------------------
+7. MUTEKSY (PTHREAD MUTEX)
+-------------------------------------------------------------------------------
+Blokady binarne (0 lub 1) służące do ochrony sekcji krytycznych (zapobieganie 
+Race Condition). Muteks może odblokować TYLKO ten wątek/proces, który go zablokował.
+
+* pthread_mutex_init(pthread_mutex_t *mutex, const pthread_mutexattr_t *attr)
+  - Inicjalizuje muteks. 
+  - Jeśli ma działać MIĘDZY PROCESAMI (w fork i mmap), należy ustawić atrybuty:
+    pthread_mutexattr_t attr;
+    pthread_mutexattr_init(&attr);
+    pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+    pthread_mutex_init(&shared_data->mutex, &attr);
+
+* pthread_mutex_lock(pthread_mutex_t *mutex)
+  - Zajmuje muteks. Jeśli jest zajęty, wątek/proces zasypia do momentu zwolnienia.
+
+* pthread_mutex_unlock(pthread_mutex_t *mutex)
+  - Zwalnia muteks, budząc jeden z oczekujących wątków/procesów.
+
+* pthread_mutex_destroy(pthread_mutex_t *mutex)
+  - Niszczy strukturę muteksu.
+
+-------------------------------------------------------------------------------
+8. BARIERY (PTHREAD BARRIER)
+-------------------------------------------------------------------------------
+Mechanizm synchronizacji fazowej. Zmusza określoną liczbę wątków/procesów do 
+zaczekania na siebie w jednym punkcie przed przejściem do kolejnego etapu.
+
+* pthread_barrier_init(pthread_barrier_t *barrier, const pthread_barrierattr_t *attr, unsigned count)
+  - Inicjalizuje barierę. 'count' to liczba wątków, które muszą dotrzeć do bariery, 
+    aby została ona otwarta.
+  - Posiada atrybut PTHREAD_PROCESS_SHARED dla pracy między procesami w mmap.
+
+* pthread_barrier_wait(pthread_barrier_t *barrier)
+  - Wątek wywołujący tę funkcję zawiesza się, dopóki dokładnie 'count' wątków 
+    nie wywoła tej samej funkcji. 
+  - Dokładnie jeden (losowy) wątek otrzymuje z tej funkcji kod zwrotny 
+    PTHREAD_BARRIER_SERIAL_THREAD (przydatne do wykonania jednej operacji 
+    jednoosobowo po otwarciu bariery), reszta otrzymuje 0.
+
+* pthread_barrier_destroy(pthread_barrier_t *barrier)
+  - Niszczy strukturę bariery.
+
+-------------------------------------------------------------------------------
+9. ZMIENNE WARUNKOWE (PTHREAD CONDITIONAL VARIABLES)
+-------------------------------------------------------------------------------
+Pozwalają wątkom zasnąć do momentu, aż spełniony zostanie określony warunek logiczny. 
+Zawsze współpracują z muteksem!
+
+* pthread_cond_init(pthread_cond_t *cond, const pthread_condattr_t *attr)
+  - Inicjalizuje zmienną warunkową (obsługuje PTHREAD_PROCESS_SHARED).
+
+* pthread_cond_wait(pthread_cond_t *cond, pthread_mutex_t *mutex)
+  - Bezpiecznie zwalnia podany muteks i usypia wątek, czekając na sygnał.
+  - PO WYBUDZENIU funkcja automatycznie ponownie zajmuje (blokuje) muteks!
+  - UWAGA: Zawsze wywołuj w pętli while(!warunek), ponieważ mogą wystąpić 
+    tzw. fałszywe wybudzenia (Spurious Wakeups).
+
+* pthread_cond_signal(pthread_cond_t *cond)
+  - Budzi DOKŁADNIE JEDEN wątek uśpiony na danej zmiennej warunkowej.
+
+* pthread_cond_broadcast(pthread_cond_t *cond)
+  - Budzi WSZYSTKIE wątki uśpione na danej zmiennej warunkowej.
+
+* pthread_cond_destroy(pthread_cond_t *cond)
+  - Niszczy zmienną warunkową.
+
+-------------------------------------------------------------------------------
+10. SZYBKA INSTRUKCJA OBRÓBKI STRINGÓW I DANYCH (HELPERY)
+-------------------------------------------------------------------------------
+* memcpy(dest, src, n)  - Kopiuje n bajtów. Kluczowe przy bezpiecznym wyciąganiu 
+                          liczb z binarnego bufora UDP bez błędów Alignment Fault.
+* memset(s, c, n)       - Wypełnia s bajtem c (czyszczenie struktur sieciowych zerami).
+* strncmp(s1, s2, n)    - Bezpieczne porównanie n znaków (bezpieczniejsze od strcmp 
+                          na buforach sieciowych bez znaku \0).
+* snprintf(str, size, format, ...) - Bezpieczne składanie stringa z ochroną przed 
+                                     Buffer Overflow.
+* sscanf(str, format, ...) - Wyciąganie sformatowanych zmiennych ze stringa tekstu.
+* ntohl() / htonl()     - Konwersja 32-bitowych liczb (Network <-> Host Endianness).
+===============================================================================
